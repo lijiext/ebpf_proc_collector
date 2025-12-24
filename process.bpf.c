@@ -6,11 +6,15 @@
 
 char LICENSE[] SEC("license") = "GPL";
 
+#define MAX_FILENAME_LEN 256
+
 struct user_proc_event {
     u32 pid;
     u32 ppid;
     u32 uid;
-    char comm[16];
+    u64 ts_ns;
+    char comm[TASK_COMM_LEN];
+    char filename[MAX_FILENAME_LEN];
 };
 
 struct {
@@ -37,9 +41,15 @@ int handle_exec(struct trace_event_raw_sched_process_exec *ctx)
     e->uid  = uid_gid & 0xffffffff;
     e->ppid = BPF_CORE_READ(task, real_parent, tgid);
 
+    e->ts_ns = bpf_ktime_get_ns();
+
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
+
+    if (ctx->filename)
+        bpf_probe_read_str(e->filename, sizeof(e->filename), ctx->filename);
+    else
+        e->filename[0] = '\0';
 
     bpf_ringbuf_submit(e, 0);
     return 0;
 }
-

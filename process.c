@@ -75,7 +75,7 @@ static size_t pw_buf_len;
 static inline unsigned long long now_ns(void)
 {
     struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
+    clock_gettime(CLOCK_MONOTONIC, &ts);
     return (unsigned long long)ts.tv_sec * NANOSEC_PER_SEC + ts.tv_nsec;
 }
 

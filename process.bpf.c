@@ -4,6 +4,10 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 
+#ifndef TASK_COMM_LEN
+#define TASK_COMM_LEN 16
+#endif
+
 char LICENSE[] SEC("license") = "GPL";
 
 #define MAX_FILENAME_LEN 256
@@ -16,6 +20,23 @@ struct user_proc_event {
     char comm[TASK_COMM_LEN];
     char filename[MAX_FILENAME_LEN];
 };
+
+static __always_inline void read_exec_filename(struct trace_event_raw_sched_process_exec *ctx,
+                                               struct user_proc_event *e)
+{
+    u32 data_loc = ctx->__data_loc_filename;
+
+    if (!data_loc) {
+        e->filename[0] = '\0';
+        return;
+    }
+
+    u32 offset = data_loc & 0xFFFF;
+    const char *filename = (const char *)ctx + offset;
+
+    if (bpf_probe_read_str(e->filename, sizeof(e->filename), filename) < 0)
+        e->filename[0] = '\0';
+}
 
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -45,10 +66,7 @@ int handle_exec(struct trace_event_raw_sched_process_exec *ctx)
 
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
 
-    if (ctx->filename)
-        bpf_probe_read_str(e->filename, sizeof(e->filename), ctx->filename);
-    else
-        e->filename[0] = '\0';
+    read_exec_filename(ctx, e);
 
     bpf_ringbuf_submit(e, 0);
     return 0;

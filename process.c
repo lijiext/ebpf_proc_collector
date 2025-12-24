@@ -425,7 +425,7 @@ int main(int argc, char **argv)
             goto cleanup;
         }
 
-        struct bpf_link **tmp = reallocarray(links, link_count + 1, sizeof(*links));
+        struct bpf_link **tmp = realloc(links, (link_count + 1) * sizeof(*links));
         if (!tmp) {
             fprintf(stderr, "failed to allocate link array\n");
             err = -ENOMEM;

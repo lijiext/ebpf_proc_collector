@@ -4,70 +4,36 @@
 #include <bpf/bpf_tracing.h>
 #include <bpf/bpf_core_read.h>
 
-#ifndef TASK_COMM_LEN
-#define TASK_COMM_LEN 16
-#endif
-
 char LICENSE[] SEC("license") = "GPL";
-
-#define MAX_FILENAME_LEN 256
 
 struct user_proc_event {
     u32 pid;
     u32 ppid;
     u32 uid;
-    u64 ts_ns;
-    char comm[TASK_COMM_LEN];
-    char filename[MAX_FILENAME_LEN];
+    char comm[16];
 };
 
-static __always_inline void read_exec_filename(struct trace_event_raw_sched_process_exec *ctx,
-                                               struct user_proc_event *e)
-{
-    u32 data_loc = ctx->__data_loc_filename;
-
-    if (!data_loc) {
-        e->filename[0] = '\0';
-        return;
-    }
-
-    u32 offset = data_loc & 0xFFFF;
-    const char *filename = (const char *)ctx + offset;
-
-    if (bpf_probe_read_str(e->filename, sizeof(e->filename), filename) < 0)
-        e->filename[0] = '\0';
-}
-
 struct {
-    __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 1 << 24);
+    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
 } events SEC(".maps");
 
 SEC("tracepoint/sched/sched_process_exec")
 int handle_exec(struct trace_event_raw_sched_process_exec *ctx)
 {
-    struct user_proc_event *e;
+    struct user_proc_event e = {};
     struct task_struct *task;
-
-    e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
-    if (!e)
-        return 0;
 
     task = (struct task_struct *)bpf_get_current_task();
 
     u64 pid_tgid = bpf_get_current_pid_tgid();
     u64 uid_gid  = bpf_get_current_uid_gid();
 
-    e->pid  = pid_tgid >> 32;
-    e->uid  = uid_gid & 0xffffffff;
-    e->ppid = BPF_CORE_READ(task, real_parent, tgid);
+    e.pid  = pid_tgid >> 32;
+    e.uid  = uid_gid & 0xffffffff;
+    e.ppid = BPF_CORE_READ(task, real_parent, tgid);
 
-    e->ts_ns = bpf_ktime_get_ns();
+    bpf_get_current_comm(&e.comm, sizeof(e.comm));
 
-    bpf_get_current_comm(&e->comm, sizeof(e->comm));
-
-    read_exec_filename(ctx, e);
-
-    bpf_ringbuf_submit(e, 0);
+    bpf_perf_event_output(ctx, &events, BPF_F_CURRENT_CPU, &e, sizeof(e));
     return 0;
 }
